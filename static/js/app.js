@@ -6,6 +6,7 @@ const App = {
     homes: [],
     deviceStates: {},
     refreshTimer: null,
+    selectedHome: "",
     webAuthed: false,
 
     CN_NAMES: {
@@ -46,6 +47,7 @@ const App = {
         this.bindBack();
         this.bindSearch();
         this.bindQrLogin();
+        this.bindHomeFilter();
         this.bindSettings();
         this.bindLogout();
         this.bindQuickPanel();
@@ -214,7 +216,6 @@ const App = {
             if (status.logged_in) {
                 this.loggedIn = true;
                 this.loadDevices();
-                this.loadHomes();
             } else {
                 this.showLoginPage();
             }
@@ -264,6 +265,17 @@ const App = {
         });
     },
 
+    bindHomeFilter() {
+        document.getElementById("homeSelector").addEventListener("click", (e) => {
+            const pill = e.target.closest(".home-pill");
+            if (!pill) return;
+            document.querySelectorAll(".home-pill").forEach((p) => p.classList.remove("active"));
+            pill.classList.add("active");
+            this.selectedHome = pill.dataset.home;
+            this.renderDevices();
+        });
+    },
+
     bindQrLogin() {
         document.getElementById("generateQrBtn").addEventListener("click", () => this.generateQrCode());
     },
@@ -281,7 +293,12 @@ const App = {
             if (!confirm("确定要退出登录吗？")) return;
             try {
                 await API.cloudLogout();
+                await API.logout();
+            } catch (err) {
+                console.error("退出失败:", err);
+            } finally {
                 this.loggedIn = false;
+                this.webAuthed = false;
                 this.devices = [];
                 this.deviceStates = {};
                 this.homes = [];
@@ -289,14 +306,11 @@ const App = {
                     clearInterval(this.refreshTimer);
                     this.refreshTimer = null;
                 }
-                this.showLoginPage();
-                document.getElementById("qrCodeContainer").innerHTML = `<div class="qr-placeholder"><button class="btn btn-primary btn-lg" id="generateQrBtn">生成登录二维码</button></div>`;
-                document.getElementById("qrStatus").className = "qr-status";
-                document.getElementById("qrStatus").textContent = "等待生成二维码";
-                document.getElementById("generateQrBtn").addEventListener("click", () => this.generateQrCode());
-                this.showToast("已退出米家登录");
-            } catch (err) {
-                this.showToast("退出登录失败");
+                // 回到管理员登录页
+                document.getElementById("page-login").classList.remove("active");
+                document.querySelectorAll(".page:not(#page-login):not(#page-web-auth)").forEach((p) => p.classList.remove("active"));
+                this.showWebAuthPage();
+                this.showToast("已退出登录");
             }
         });
     },
@@ -320,6 +334,7 @@ const App = {
         if (res.success) {
             this.devices = res.devices || [];
             this.loadDeviceStates();
+            this.loadHomes();
             this.renderDevices();
         }
     },
@@ -329,6 +344,11 @@ const App = {
         const searchVal = document.getElementById("searchInput")?.value.toLowerCase() || "";
 
         let filtered = this.devices;
+        // 按家庭筛选
+        if (this.selectedHome) {
+            filtered = filtered.filter((d) => d.home_name === this.selectedHome);
+        }
+        // 按搜索筛选
         if (searchVal) {
             filtered = filtered.filter(
                 (d) => d.name.toLowerCase().includes(searchVal) || (d.model || "").toLowerCase().includes(searchVal)
@@ -343,10 +363,23 @@ const App = {
             const res = await API.getHomes();
             if (res.success && res.homes && res.homes.length > 0) {
                 this.homes = res.homes;
+                this.renderHomeSelector();
             }
         } catch (err) {
             console.error("Load homes error:", err);
         }
+    },
+
+    renderHomeSelector() {
+        const selector = document.getElementById("homeSelector");
+        selector.innerHTML = `<button class="home-pill active" data-home="">全部</button>`;
+        this.homes.forEach((home) => {
+            const pill = document.createElement("button");
+            pill.className = "home-pill";
+            pill.dataset.home = home.name;
+            pill.textContent = home.name;
+            selector.appendChild(pill);
+        });
     },
 
     async loadDeviceStates() {
@@ -427,7 +460,6 @@ const App = {
                     this.loggedIn = true;
                     this.showMainApp();
                     this.loadDevices();
-                    this.loadHomes();
                     this.showToast("登录成功！");
                     return;
                 }

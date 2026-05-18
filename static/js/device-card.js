@@ -146,17 +146,21 @@ function createRoomCard(roomName, devices) {
 
     const icon = getRoomIcon(roomName);
     const onlineCount = devices.filter(d => d.online !== false).length;
+    const totalDevices = devices.length;
 
     roomCard.innerHTML = `
-        <div class="room-header">
+        <div class="room-left">
+            <span class="room-icon">${icon}</span>
             <div class="room-info">
-                <span class="room-icon">${icon}</span>
                 <span class="room-name">${roomName}</span>
+                <span class="room-sub">${totalDevices} 个设备${onlineCount < totalDevices ? "，" + onlineCount + " 个在线" : ""}</span>
             </div>
-            <span class="room-count">${onlineCount}/${devices.length}</span>
         </div>
-        <div class="room-chevron">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        <div class="room-right">
+            <span class="room-badge">${onlineCount}/${totalDevices}</span>
+            <span class="room-arrow">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
         </div>
         <div class="room-devices" style="display:none;">
         </div>
@@ -166,16 +170,16 @@ function createRoomCard(roomName, devices) {
     roomCard.addEventListener("click", (e) => {
         if (e.target.closest(".sdc-switch") || e.target.closest(".sdc-icon")) return;
         const devicesContainer = roomCard.querySelector(".room-devices");
-        const chevron = roomCard.querySelector(".room-chevron svg");
+        const arrow = roomCard.querySelector(".room-arrow svg");
         const isExpanded = devicesContainer.style.display !== "none";
 
         if (isExpanded) {
             devicesContainer.style.display = "none";
-            chevron.style.transform = "rotate(0deg)";
+            arrow.style.transform = "rotate(0deg)";
             roomCard.classList.remove("expanded");
         } else {
             devicesContainer.style.display = "grid";
-            chevron.style.transform = "rotate(180deg)";
+            arrow.style.transform = "rotate(180deg)";
             roomCard.classList.add("expanded");
             // 首次展开时渲染设备
             if (devicesContainer.children.length === 0) {

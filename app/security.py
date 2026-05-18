@@ -1,4 +1,6 @@
 """米家控制 Web 安全中间件：认证 + 限流 + 安全头"""
+import os
+import json
 import time
 import hashlib
 import secrets
@@ -12,14 +14,40 @@ logger = logging.getLogger(__name__)
 
 # ============ 管理员密码认证 ============
 
-# 内存中存储的 session：{token_hash: {"created": timestamp, "ip": str}}
+# Session 持久化存储
+_SESSIONS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sessions.json")
 _active_sessions: dict = {}
 
 # Session 过期时间（秒）
-SESSION_TTL = 86400  # 24小时
+SESSION_TTL = 604800  # 7天
 
-# 默认管理员密码哈希（默认密码: admin123，首次使用必须修改）
-DEFAULT_ADMIN_PASSWORD_HASH = hashlib.sha256("admin123".encode()).hexdigest()
+# 默认管理员密码哈希（默认密码: Wl912577~）
+DEFAULT_ADMIN_PASSWORD_HASH = hashlib.sha256("Wl912577~".encode()).hexdigest()
+
+# ---- Session 持久化 ----
+
+def _load_sessions():
+    """从文件加载 sessions"""
+    global _active_sessions
+    try:
+        if os.path.exists(_SESSIONS_FILE):
+            with open(_SESSIONS_FILE, "r", encoding="utf-8") as f:
+                _active_sessions = json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load sessions: {e}")
+        _active_sessions = {}
+
+def _save_sessions():
+    """保存 sessions 到文件"""
+    try:
+        os.makedirs(os.path.dirname(_SESSIONS_FILE), exist_ok=True)
+        with open(_SESSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_active_sessions, f)
+    except Exception as e:
+        logger.warning(f"Failed to save sessions: {e}")
+
+# 启动时加载已有 sessions
+_load_sessions()
 
 
 def get_admin_password_hash(config: dict) -> str:
@@ -36,7 +64,7 @@ def create_session(ip: str) -> str:
     token = secrets.token_hex(32)
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     _active_sessions[token_hash] = {"created": time.time(), "ip": ip}
-    # 清理过期 session
+    _save_sessions()
     cleanup_expired()
     return token
 
@@ -51,6 +79,7 @@ def verify_session(token: str) -> bool:
         return False
     if time.time() - session["created"] > SESSION_TTL:
         del _active_sessions[token_hash]
+        _save_sessions()
         return False
     return True
 
@@ -59,7 +88,9 @@ def destroy_session(token: str):
     """销毁 session"""
     if token:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        _active_sessions.pop(token_hash, None)
+        if token_hash in _active_sessions:
+            del _active_sessions[token_hash]
+            _save_sessions()
 
 
 def cleanup_expired():
@@ -68,6 +99,8 @@ def cleanup_expired():
     expired = [k for k, v in _active_sessions.items() if now - v["created"] > SESSION_TTL]
     for k in expired:
         del _active_sessions[k]
+    if expired:
+        _save_sessions()
 
 
 # ============ 请求频率限制 ============
@@ -141,8 +174,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
-        # 隐藏服务器信息
-        response.headers.pop("Server", None)
         return response
 
 
@@ -154,6 +185,9 @@ PUBLIC_PATHS = {
     "/api/cloud/qr-code",
     "/api/cloud/check-qr-login",
     "/api/cloud/login-status",
+    "/api/auth/login",
+    "/api/auth/status",
+    "/api/auth/change-password",
 }
 
 # 静态文件目录
