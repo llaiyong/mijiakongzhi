@@ -110,6 +110,8 @@ def get_config():
     config = device_manager.config.copy()
     if "cloud" in config and "password" in config["cloud"]:
         config["cloud"]["password"] = "***" if config["cloud"]["password"] else ""
+    if "security" in config and "admin_password" in config["security"]:
+        config["security"]["admin_password"] = "****" if config["security"]["admin_password"] else ""
     # 确保返回新字段
     config.setdefault("default_control_mode", "local")
     config.setdefault("cors_origins", "")

@@ -6,10 +6,8 @@ const App = {
     homes: [],
     deviceStates: {},
     refreshTimer: null,
-    selectedHome: "",
-    loggedIn: false,
+    webAuthed: false,
 
-    // 中文名映射
     CN_NAMES: {
         "Device Manufacturer": "设备制造商", "Device Model": "设备型号",
         "Device Serial Number": "设备序列号", "Device ID": "设备ID",
@@ -41,19 +39,18 @@ const App = {
         return this.CN_NAMES[text] || text;
     },
 
-    init() {
+    async init() {
         this.bindNav();
         this.bindRefresh();
         this.bindAddDevice();
         this.bindBack();
         this.bindSearch();
         this.bindQrLogin();
-        this.bindHomeFilter();
         this.bindSettings();
         this.bindLogout();
         this.bindQuickPanel();
-        this.checkLoginStatus();
-        this.startAutoRefresh();
+        this.bindWebAuth();
+        await this.checkWebAuth();
     },
 
     bindQuickPanel() {
@@ -61,7 +58,6 @@ const App = {
         const closeBtn = document.getElementById("quickPanelClose");
         if (closeBtn) closeBtn.addEventListener("click", () => this.closeQuickPanel());
         if (overlay) overlay.addEventListener("click", () => this.closeQuickPanel());
-        // ESC 关闭
         document.addEventListener("keydown", (e) => {
             if (e.key === "Escape") this.closeQuickPanel();
         });
@@ -94,14 +90,12 @@ const App = {
         const properties = statusRes.properties || [];
         const controls = specRes.controls || [];
 
-        // 过滤掉不可读写的设备信息
         const meaningfulProps = properties.filter((p) =>
             !["Device Manufacturer", "Device Model", "Device Serial Number", "Device ID", "Current Firmware Version", "Serial Number"].includes(p.name)
         );
 
         let html = "";
 
-        // 设备状态
         if (meaningfulProps.length > 0) {
             html += `<div class="quick-section"><h4 class="quick-section-title">设备状态</h4>`;
             meaningfulProps.forEach((p) => {
@@ -114,7 +108,6 @@ const App = {
             html += `</div>`;
         }
 
-        // 快捷控制
         if (controls.length > 0) {
             html += `<div class="quick-section"><h4 class="quick-section-title">快捷控制</h4>`;
             controls.forEach((ctrl) => {
@@ -128,8 +121,6 @@ const App = {
         }
 
         body.innerHTML = html;
-
-        // 绑定控制面板事件
         bindPanelEvents(body, device);
     },
 
@@ -138,9 +129,8 @@ const App = {
         const overlay = document.getElementById("quickPanelOverlay");
         panel.classList.remove("active");
         overlay.classList.remove("active");
-        // 刷新卡片状态
         this.loadDeviceStates().then(() => {
-            document.querySelectorAll(".device-card").forEach((card) => {
+            document.querySelectorAll(".simple-device-card").forEach((card) => {
                 const did = card.dataset.did;
                 if (did && this.deviceStates[did]) {
                     updateCardState(card, this.deviceStates[did]);
@@ -149,11 +139,80 @@ const App = {
         });
     },
 
-    checkLoginStatus() {
+    async checkWebAuth() {
+        const res = await API.authStatus();
+        if (res.authenticated) {
+            this.webAuthed = true;
+            this.showMainApp();
+            this.checkMijiaLogin();
+            this.startAutoRefresh();
+        } else {
+            this.showWebAuthPage();
+        }
+    },
+
+    showWebAuthPage() {
+        document.getElementById("sidebar").style.display = "none";
+        document.getElementById("refreshBtn").style.display = "none";
+        document.getElementById("logoutBtn").style.display = "none";
+        document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
+
+        let authPage = document.getElementById("page-web-auth");
+        if (!authPage) {
+            const main = document.querySelector(".content");
+            authPage = document.createElement("div");
+            authPage.id = "page-web-auth";
+            authPage.className = "page active";
+            authPage.innerHTML = `
+                <div class="web-auth-card">
+                    <div class="auth-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </div>
+                    <h2>管理面板登录</h2>
+                    <p class="auth-desc">请输入管理员密码以访问米家控制</p>
+                    <form id="webAuthForm">
+                        <div class="auth-input-group">
+                            <input type="password" id="webAuthPassword" placeholder="请输入管理员密码" autocomplete="current-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg">登录</button>
+                    </form>
+                    <div id="webAuthError" class="auth-error" style="display:none;"></div>
+                </div>
+            `;
+            main.appendChild(authPage);
+        } else {
+            authPage.classList.add("active");
+        }
+
+        document.getElementById("webAuthForm").addEventListener("submit", (e) => {
+            e.preventDefault();
+            this.doWebAuth();
+        });
+    },
+
+    async doWebAuth() {
+        const pwd = document.getElementById("webAuthPassword").value;
+        const errorEl = document.getElementById("webAuthError");
+        errorEl.style.display = "none";
+
+        const res = await API.login(pwd);
+        if (res.success) {
+            this.webAuthed = true;
+            document.getElementById("page-web-auth")?.classList.remove("active");
+            this.showMainApp();
+            this.checkMijiaLogin();
+            this.startAutoRefresh();
+            this.showToast("管理面板登录成功");
+        } else {
+            errorEl.textContent = res.message || "密码错误";
+            errorEl.style.display = "block";
+        }
+    },
+
+    checkMijiaLogin() {
         API.getLoginStatus().then((status) => {
             if (status.logged_in) {
                 this.loggedIn = true;
-                this.showMainApp();
                 this.loadDevices();
                 this.loadHomes();
             } else {
@@ -166,7 +225,7 @@ const App = {
 
     showLoginPage() {
         document.getElementById("page-login").classList.add("active");
-        document.querySelectorAll(".page:not(#page-login)").forEach((p) => p.classList.remove("active"));
+        document.querySelectorAll(".page:not(#page-login):not(#page-web-auth)").forEach((p) => p.classList.remove("active"));
         document.getElementById("sidebar").style.display = "none";
         document.getElementById("refreshBtn").style.display = "none";
         document.getElementById("logoutBtn").style.display = "none";
@@ -174,6 +233,7 @@ const App = {
 
     showMainApp() {
         document.getElementById("page-login").classList.remove("active");
+        document.getElementById("page-web-auth")?.classList.remove("active");
         document.getElementById("page-devices").classList.add("active");
         document.getElementById("sidebar").style.display = "";
         document.getElementById("refreshBtn").style.display = "";
@@ -185,9 +245,7 @@ const App = {
             item.addEventListener("click", () => {
                 const page = item.dataset.page;
                 this.navigate(page);
-                if (page === "devices") {
-                    this.renderDevices();
-                }
+                if (page === "devices") this.renderDevices();
             });
         });
     },
@@ -206,31 +264,27 @@ const App = {
         });
     },
 
-    bindHomeFilter() {
-        document.getElementById("homeSelector").addEventListener("click", (e) => {
-            const pill = e.target.closest(".home-pill");
-            if (!pill) return;
-            document.querySelectorAll(".home-pill").forEach((p) => p.classList.remove("active"));
-            pill.classList.add("active");
-            this.selectedHome = pill.dataset.home;
-            this.renderDevices();
-        });
-    },
-
     bindQrLogin() {
         document.getElementById("generateQrBtn").addEventListener("click", () => this.generateQrCode());
+    },
+
+    bindWebAuth() {
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && document.activeElement?.id === "webAuthPassword") {
+                this.doWebAuth();
+            }
+        });
     },
 
     bindLogout() {
         document.getElementById("logoutBtn").addEventListener("click", async () => {
             if (!confirm("确定要退出登录吗？")) return;
             try {
-                await API.logout();
+                await API.cloudLogout();
                 this.loggedIn = false;
                 this.devices = [];
                 this.deviceStates = {};
                 this.homes = [];
-                this.selectedHome = "";
                 if (this.refreshTimer) {
                     clearInterval(this.refreshTimer);
                     this.refreshTimer = null;
@@ -240,9 +294,8 @@ const App = {
                 document.getElementById("qrStatus").className = "qr-status";
                 document.getElementById("qrStatus").textContent = "等待生成二维码";
                 document.getElementById("generateQrBtn").addEventListener("click", () => this.generateQrCode());
-                this.showToast("已退出登录");
+                this.showToast("已退出米家登录");
             } catch (err) {
-                console.error("Logout error:", err);
                 this.showToast("退出登录失败");
             }
         });
@@ -253,15 +306,13 @@ const App = {
             item.classList.toggle("active", item.dataset.page === page);
         });
         document.querySelectorAll(".page").forEach((p) => {
-            p.classList.toggle("active", p.id === `page-${page}`);
+            if (p.id !== "page-web-auth") {
+                p.classList.toggle("active", p.id === `page-${page}`);
+            }
         });
         this.currentPage = page;
-        if (page === "settings") {
-            this.loadSettings();
-        }
-        if (page === "devices") {
-            this.renderDevices();
-        }
+        if (page === "settings") this.loadSettings();
+        if (page === "devices") this.renderDevices();
     },
 
     async loadDevices() {
@@ -278,79 +329,13 @@ const App = {
         const searchVal = document.getElementById("searchInput")?.value.toLowerCase() || "";
 
         let filtered = this.devices;
-        if (this.selectedHome) {
-            filtered = filtered.filter((d) => d.home_name === this.selectedHome);
-        }
         if (searchVal) {
             filtered = filtered.filter(
                 (d) => d.name.toLowerCase().includes(searchVal) || (d.model || "").toLowerCase().includes(searchVal)
             );
         }
 
-        if (this.selectedHome) {
-            this.renderRoomGrouped(filtered, container);
-        } else {
-            renderDeviceGrid(filtered, container);
-        }
-    },
-
-    renderRoomGrouped(devices, container) {
-        container.innerHTML = "";
-        if (!devices || devices.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-                    <p>暂无设备</p>
-                </div>`;
-            return;
-        }
-
-        const groups = {};
-        devices.forEach((d) => {
-            const room = d.room_name || "未分组";
-            if (!groups[room]) groups[room] = [];
-            groups[room].push(d);
-        });
-
-        for (const [room, devs] of Object.entries(groups)) {
-            const section = document.createElement("div");
-            section.className = "room-section";
-            section.innerHTML = `
-                <div class="room-header">
-                    <h3 class="room-title">${room}</h3>
-                    <button class="room-toggle-btn" title="展开/收起">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-                    </button>
-                </div>
-                <div class="room-content">
-                    <div class="device-grid"></div>
-                </div>
-            `;
-            container.appendChild(section);
-
-            const grid = section.querySelector(".device-grid");
-            devs.forEach((device, index) => {
-                const card = createDeviceCard(device);
-                card.style.animationDelay = `${index * 50}ms`;
-                grid.appendChild(card);
-            });
-
-            // 折叠/展开
-            const header = section.querySelector(".room-header");
-            const content = section.querySelector(".room-content");
-            const chevron = section.querySelector(".room-toggle-btn svg");
-            let collapsed = false;
-
-            header.addEventListener("click", () => {
-                collapsed = !collapsed;
-                section.classList.toggle("collapsed", collapsed);
-                content.style.maxHeight = collapsed ? "0" : content.scrollHeight + "px";
-                chevron.style.transform = collapsed ? "rotate(-90deg)" : "rotate(0deg)";
-            });
-
-            // 初始展开，设置正确高度
-            content.style.maxHeight = content.scrollHeight + "px";
-        }
+        renderDeviceGrid(filtered, container);
     },
 
     async loadHomes() {
@@ -358,23 +343,10 @@ const App = {
             const res = await API.getHomes();
             if (res.success && res.homes && res.homes.length > 0) {
                 this.homes = res.homes;
-                this.renderHomeSelector();
             }
         } catch (err) {
             console.error("Load homes error:", err);
         }
-    },
-
-    renderHomeSelector() {
-        const selector = document.getElementById("homeSelector");
-        selector.innerHTML = `<button class="home-pill active" data-home="">全部</button>`;
-        this.homes.forEach((home) => {
-            const pill = document.createElement("button");
-            pill.className = "home-pill";
-            pill.dataset.home = home.name;
-            pill.textContent = home.name;
-            selector.appendChild(pill);
-        });
     },
 
     async loadDeviceStates() {
@@ -395,7 +367,7 @@ const App = {
         this.refreshTimer = setInterval(() => {
             if (this.loggedIn && this.currentPage === "devices" && this.devices.length > 0) {
                 this.loadDeviceStates().then(() => {
-                    document.querySelectorAll(".device-card").forEach((card) => {
+                    document.querySelectorAll(".simple-device-card").forEach((card) => {
                         const did = card.dataset.did;
                         if (did && this.deviceStates[did]) {
                             updateCardState(card, this.deviceStates[did]);
@@ -473,7 +445,6 @@ const App = {
         } catch (err) {
             statusEl.className = "qr-status error";
             statusEl.textContent = "请求失败，请检查网络连接";
-            console.error("QR generation error:", err);
         }
     },
 
@@ -556,7 +527,6 @@ const App = {
             } catch (err) {
                 result.className = "result-msg error";
                 result.textContent = "请求失败，请检查网络连接";
-                console.error("Add device error:", err);
             }
         });
     },
@@ -604,7 +574,6 @@ const App = {
             } catch (err) {
                 result.className = "result-msg error";
                 result.textContent = "请求失败，请检查网络连接";
-                console.error("Update settings error:", err);
             }
         });
     },

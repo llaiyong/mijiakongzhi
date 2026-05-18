@@ -14,9 +14,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# 先安装依赖（利用 Docker 层缓存）
+# 先安装依赖（利用 Docker 层缓存），使用阿里云 PyPI 镜像加速
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 # 创建非 root 用户
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
